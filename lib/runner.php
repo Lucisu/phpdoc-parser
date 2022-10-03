@@ -41,13 +41,18 @@ function get_wp_files( $directory ) {
 /**
  * @param array  $files
  * @param string $root
+ * @param string $ignore_data
  *
  * @return array
  */
-function parse_files( $files, $root ) {
+function parse_files( $files, $root, $ignore_data = array() ) {
 	$output = array();
 
 	foreach ( $files as $filename ) {
+		if ( ! should_parse_it( $filename, 'files', $ignore_data ) ) {
+			continue;
+		}
+
 		$file = new File_Reflector( $filename );
 
 		$path = ltrim( substr( $filename, strlen( $root ) ), DIRECTORY_SEPARATOR );
@@ -83,10 +88,13 @@ function parse_files( $files, $root ) {
 		}
 
 		if ( ! empty( $file->uses['hooks'] ) ) {
-			$out['hooks'] = export_hooks( $file->uses['hooks'] );
+			$out['hooks'] = export_hooks( $file->uses['hooks'], $ignore_data );
 		}
 
 		foreach ( $file->getFunctions() as $function ) {
+			if ( ! should_parse_it( $function->getShortName(), 'functions', $ignore_data ) ) {
+				continue;
+			}
 			$func = array(
 				'name'      => $function->getShortName(),
 				'namespace' => $function->getNamespace(),
@@ -102,7 +110,7 @@ function parse_files( $files, $root ) {
 				$func['uses'] = export_uses( $function->uses );
 
 				if ( ! empty( $function->uses['hooks'] ) ) {
-					$func['hooks'] = export_hooks( $function->uses['hooks'] );
+					$func['hooks'] = export_hooks( $function->uses['hooks'], $ignore_data );
 				}
 			}
 
@@ -110,6 +118,9 @@ function parse_files( $files, $root ) {
 		}
 
 		foreach ( $file->getClasses() as $class ) {
+			if ( ! should_parse_it( $class->getShortName(), 'classes', $ignore_data ) ) {
+				continue;
+			}
 			$class_data = array(
 				'name'       => $class->getShortName(),
 				'namespace'  => $class->getNamespace(),
@@ -120,7 +131,7 @@ function parse_files( $files, $root ) {
 				'extends'    => $class->getParentClass(),
 				'implements' => $class->getInterfaces(),
 				'properties' => export_properties( $class->getProperties() ),
-				'methods'    => export_methods( $class->getMethods() ),
+				'methods'    => export_methods( $class->getMethods(), $ignore_data ),
 				'doc'        => export_docblock( $class ),
 			);
 
@@ -131,6 +142,41 @@ function parse_files( $files, $root ) {
 	}
 
 	return $output;
+}
+
+/**
+ * Checks with the ignore file whether the element should be parsed or not.
+ *
+ * @param string $thing       The element to be parsed.
+ * @param string $type        The type of the element. For example: files, hooks, classes, etc.
+ * @param array  $ignore_data The ignore data from the JSON file.
+ * @return boolean
+ */
+function should_parse_it( $thing, $type, $ignore_data ) {
+	if ( empty( $ignore_data ) || empty( $ignore_data[ $type ] ) ) {
+		return true;
+	}
+
+	if ( ! is_array( $ignore_data[ $type ] ) ) {
+		if ( '*' === $ignore_data[ $type ] ) {
+			return false;
+		}
+		$ignore_data[ $type ] = array( $ignore_data[ $type ] );
+	}
+
+	if ( in_array( $thing, $ignore_data[ $type ], true ) ) {
+		return false;
+	}
+
+	foreach ( $ignore_data[ $type ] as $key => $regex ) {
+		if ( '/' === substr( $regex, - 1 ) && '/' === substr( $regex, 0, 1 ) ) {
+			if ( preg_match( $regex, $thing ) ) {
+				return false;
+			}
+		}
+	}
+
+	return true;
 }
 
 /**
@@ -248,13 +294,17 @@ function export_docblock( $element ) {
 
 /**
  * @param Hook_Reflector[] $hooks
+ * @param array            $ignore_data
  *
  * @return array
  */
-function export_hooks( array $hooks ) {
+function export_hooks( array $hooks, $ignore_data = array() ) {
 	$out = array();
 
 	foreach ( $hooks as $hook ) {
+		if ( ! should_parse_it( $hook->getName(), 'hooks', $ignore_data ) ) {
+			continue;
+		}
 		$out[] = array(
 			'name'      => $hook->getName(),
 			'line'      => $hook->getLineNumber(),
@@ -313,13 +363,17 @@ function export_properties( array $properties ) {
 
 /**
  * @param MethodReflector[] $methods
+ * @param array             $ignore_data
  *
  * @return array
  */
-function export_methods( array $methods ) {
+function export_methods( array $methods, $ignore_data = array() ) {
 	$output = array();
 
 	foreach ( $methods as $method ) {
+		if ( ! should_parse_it( $method->getShortName(), 'methods', $ignore_data ) ) {
+			continue;
+		}
 
 		$method_data = array(
 			'name'       => $method->getShortName(),
@@ -339,7 +393,7 @@ function export_methods( array $methods ) {
 			$method_data['uses'] = export_uses( $method->uses );
 
 			if ( ! empty( $method->uses['hooks'] ) ) {
-				$method_data['hooks'] = export_hooks( $method->uses['hooks'] );
+				$method_data['hooks'] = export_hooks( $method->uses['hooks'], $ignore_data );
 			}
 		}
 
